@@ -1,0 +1,6 @@
+aws_region   = "us-east-1"
+project_name = "autoservicemanager"
+environment  = "homolog"
+
+# tf_state_bucket = "autoservicemanager-tfstate-ACCOUNT_ID"
+# node_desired_size = 1

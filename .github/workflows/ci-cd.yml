@@ -1,0 +1,117 @@
+name: Infra K8s CI/CD
+
+# Standalone repo (pós-cisão). Consome remote_state db/<env>/ (ADR-008).
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: '1.5.7'
+  TF_LOCK_TABLE: autoservicemanager-tflock
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+
+jobs:
+  security-gate:
+    uses: ./.github/workflows/security-gate.yml
+
+  validate:
+    needs: security-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init (no backend)
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+  plan-apply:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
+    needs: [validate, security-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ github.ref == 'refs/heads/master' && 'production' || 'homolog' }}
+    env:
+      TF_VAR_environment: ${{ github.ref == 'refs/heads/master' && 'prod' || 'homolog' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve state bucket and keys
+        id: backend
+        run: |
+          if [ -n "${TF_STATE_BUCKET}" ]; then
+            echo "bucket=${TF_STATE_BUCKET}" >> "$GITHUB_OUTPUT"
+          else
+            ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+            echo "bucket=autoservicemanager-tfstate-${ACCOUNT}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+            echo "key=k8s/prod/terraform.tfstate" >> "$GITHUB_OUTPUT"
+          else
+            echo "key=k8s/homolog/terraform.tfstate" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ steps.backend.outputs.bucket }}" \
+            -backend-config="key=${{ steps.backend.outputs.key }}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${TF_LOCK_TABLE}" \
+            -backend-config="encrypt=true"
+
+      - name: Export TF_VAR_tf_state_bucket
+        run: echo "TF_VAR_tf_state_bucket=${{ steps.backend.outputs.bucket }}" >> "$GITHUB_ENV"
+
+      - name: Wait for infra-db remote state
+        run: |
+          KEY="db/${TF_VAR_environment}/terraform.tfstate"
+          BUCKET="${{ steps.backend.outputs.bucket }}"
+          for i in $(seq 1 40); do
+            if aws s3 ls "s3://${BUCKET}/${KEY}" >/dev/null 2>&1; then
+              echo "Remote state found: s3://${BUCKET}/${KEY}"
+              exit 0
+            fi
+            echo "Waiting for infra-db state (${i}/40)..."
+            sleep 30
+          done
+          echo "::error::infra-db state not found at s3://${BUCKET}/${KEY}. Conclua o Infra DB CI/CD antes do infra-k8s."
+          exit 1
+
+      - name: Terraform plan
+        run: terraform plan -no-color -input=false -out=tfplan
+
+      - name: Terraform apply
+        run: terraform apply -input=false tfplan
