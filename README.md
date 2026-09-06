@@ -1,22 +1,26 @@
 # autoservicemanager-infra-k8s
 
-Terraform do stack **compute/edge** (Fase 3): EKS, NLB, VPC Link, API Gateway HTTP API, JWT Authorizer, Lambda authCpf, JWKS (S3+CloudFront), IRSA e observabilidade.
+## Propósito
 
-Repositório standalone (pós-cisão). Consome `terraform_remote_state` do [autoservicemanager-infra-db](https://github.com/dinhogt/autoservicemanager-infra-db) (ADR-008).
+Infraestrutura como código do **cluster Kubernetes**, **API Gateway**, wiring da Lambda de auth, JWKS e **observabilidade** (Fase 3). Consome outputs do [infra-db](https://github.com/dinhogt/autoservicemanager-infra-db) via remote state (ADR-008).
 
-**Docs:** [RFC-001](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/architecture/rfc-001-cloud-aws.md) · [ADR-004](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/architecture/adr-004-api-gateway-vpc-link.md)–[009](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/architecture/adr-009-github-oidc-aws-iam.md) · [obs](https://github.com/dinhogt/autoservicemanager-app/tree/develop/docs/observability) · [runbook](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/runbook.md)
+## Tecnologias
 
-## Escopo neste repo
+Terraform ≥ 1.5  · EKS  · API Gateway HTTP API  · NLB / VPC Link  · Lambda  · CloudWatch / X-Ray / Container Insights  · GitHub Actions OIDC
+
+**Docs canônicos (app):** [delivery-index](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/architecture/delivery-index.md) · [RFC-001](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/architecture/rfc-001-cloud-aws.md) · [ADR-004](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/architecture/adr-004-api-gateway-vpc-link.md) · [ADR-011](https://github.com/dinhogt/autoservicemanager-app/blob/develop/docs/architecture/adr-011-sync-rest-api-gateway.md) · [obs](https://github.com/dinhogt/autoservicemanager-app/tree/develop/docs/observability)
+
+## Escopo neste repo (diagrama)
 
 ```mermaid
 flowchart TB
   subgraph k8sRepo [autoservicemanager-infra-k8s]
-    EKS[EKS + node group]
-    NLB[NLB interno + TG]
-    APIGW[API Gateway + JWT Authorizer]
-    Lambda[Lambda authCpf placeholder]
-    JWKS[JWKS S3 + CloudFront]
-    Obs[CloudWatch / X-Ray addon]
+    EKS[EKS node group]
+    NLB[NLB interno TG]
+    APIGW[APIGW JWT Authorizer]
+    Lambda[Lambda auth wiring]
+    JWKS[JWKS S3 CloudFront]
+    Obs[CW Container Insights X-Ray]
   end
   DB[(infra-db remote_state)] --> k8sRepo
   APIGW --> Lambda
