@@ -35,8 +35,9 @@ flowchart TB
 | Remote state | Lê `db/<homolog\|prod>/terraform.tfstate` |
 | EKS | Kubernetes 1.34, node `t3.medium` |
 | API Gateway | `POST /auth/cpf` → Lambda; rotas cliente com JWT; admin/health sem RS256 |
-| Lambda | Placeholder no plan; código real via CI [auth-lambda](https://github.com/dinhogt/autoservicemanager-auth-lambda) |
-| Observabilidade | Addon CloudWatch observability, dashboards, alarmes SNS |
+| Lambda | Placeholder no plan; código real via CI [auth-lambda](https://github.com/dinhogt/autoservicemanager-auth-lambda) (auth-cpf + notify-os) |
+| SNS | `os-notifications` → Lambda notify-os → SES |
+| Observabilidade | Addon CloudWatch observability, dashboards (OS volume, fases, CPU/mem), alarmes SNS (ADR-012) |
 
 ## Pré-requisitos
 
@@ -57,8 +58,9 @@ TF_VAR_environment=homolog TF_VAR_tf_state_bucket=... terraform apply
 
 1. Anotar IRSA ARNs nos ServiceAccounts do [app](https://github.com/dinhogt/autoservicemanager-app)
 2. Registrar pods no `target_group_arn`
-3. Secret `AUTH_LAMBDA_NAME` no repo auth-lambda
-4. Assinar SNS de alertas (docs obs no app)
+3. Secrets `AUTH_LAMBDA_NAME` + `NOTIFY_LAMBDA_NAME` no repo auth-lambda
+4. ConfigMap/Secret `OS_NOTIFICATIONS_TOPIC_ARN` no app
+5. Assinar SNS de alertas (docs obs no app)
 
 Swagger / Postman: [app README](https://github.com/dinhogt/autoservicemanager-app#documentação-da-api-swagger).
 
@@ -68,11 +70,11 @@ Workflows: [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) + [`secu
 
 | Evento | Ação |
 |--------|------|
-| PR | `security-gate` → `fmt` + `validate` — **sem AWS** |
-| Push `develop` | OIDC → plan/apply; key `k8s/homolog/` (aguarda state db) |
+| PR (só `.tf` / modules / workflows) | `security-gate` ∥ `fmt` + `validate` — **sem AWS** |
+| Push `develop` | OIDC → plan/apply; key `k8s/homolog/` (fail-fast se state db ausente) |
 | Push `master` | OIDC → plan/apply; key `k8s/prod/` |
 
-Secrets: `AWS_ROLE_ARN`. Var opcional: `TF_STATE_BUCKET`. Sem path filters de monorepo.
+**Proteção:** `master` só via Pull Request; deploys automáticos em `develop`/`master`. Secrets: `AWS_ROLE_ARN`. Cache de providers; wait do remote state limitado a ~30s.
 
 ## Destroy
 
@@ -80,4 +82,4 @@ Destruir **este stack antes** do [infra-db](https://github.com/dinhogt/autoservi
 
 ## Outputs principais
 
-`api_endpoint`, `jwt_issuer`, `eks_cluster_name`, `auth_lambda_name`, `target_group_arn`, `app_irsa_role_arn`, `ops_alerts_topic_arn`, `ops_dashboard_name`
+`api_endpoint`, `jwt_issuer`, `eks_cluster_name`, `auth_lambda_name`, `notify_lambda_name`, `os_notifications_topic_arn`, `target_group_arn`, `app_irsa_role_arn`, `ops_alerts_topic_arn`, `ops_dashboard_name`

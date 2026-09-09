@@ -47,6 +47,12 @@ resource "aws_iam_role_policy" "app_irsa" {
         Effect   = "Allow"
         Action   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"]
         Resource = ["*"]
+      },
+      {
+        Sid      = "PublishOsNotifications"
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = [aws_sns_topic.os_notifications.arn]
       }
     ]
   })

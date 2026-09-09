@@ -79,3 +79,8 @@ variable "lambda_timeout_s" {
   default = 5
 }
 
+variable "notify_email_from" {
+  type        = string
+  description = "Remetente SES da Lambda notify-os (sandbox: e-mail verificado)"
+  default     = "noreply@autoservicemanager.local"
+}

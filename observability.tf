@@ -171,9 +171,58 @@ resource "aws_cloudwatch_dashboard" "fase3" {
         }
       },
       {
-        type   = "log"
+        type   = "metric"
         x      = 0
         y      = 13
+        width  = 8
+        height = 6
+        properties = {
+          title  = "OS criadas — volume diário"
+          region = var.aws_region
+          stat   = "Sum"
+          period = 86400
+          metrics = [
+            ["AutoServiceManager/${var.environment}", "OsCriada", { label = "OsCriada" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 13
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Tempo médio por fase (ms)"
+          region = var.aws_region
+          period = 300
+          metrics = [
+            ["AutoServiceManager/${var.environment}", "OsFaseDuracao", "Fase", "Diagnostico", { stat = "Average", label = "Diagnóstico" }],
+            ["...", "Execucao", { stat = "Average", label = "Execução" }],
+            ["...", "Finalizacao", { stat = "Average", label = "Finalização" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 13
+        width  = 8
+        height = 6
+        properties = {
+          title  = "EKS — CPU / memória pods (Container Insights)"
+          region = var.aws_region
+          period = 60
+          metrics = [
+            ["ContainerInsights", "pod_cpu_utilization", "ClusterName", module.eks.cluster_name, "Namespace", "autoservice", { stat = "Average", label = "CPU %" }],
+            [".", "pod_memory_utilization", ".", ".", ".", ".", { stat = "Average", label = "Mem %", yAxis = "right" }],
+          ]
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 19
         width  = 24
         height = 6
         properties = {

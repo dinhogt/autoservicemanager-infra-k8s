@@ -68,6 +68,19 @@ output "auth_lambda_arn" {
   value = aws_lambda_function.auth_cpf.arn
 }
 
+output "notify_lambda_name" {
+  value = aws_lambda_function.notify_os.function_name
+}
+
+output "notify_lambda_arn" {
+  value = aws_lambda_function.notify_os.arn
+}
+
+output "os_notifications_topic_arn" {
+  description = "SNS topic — app publica notificações de OS/orçamento"
+  value       = aws_sns_topic.os_notifications.arn
+}
+
 output "db_secret_arn" {
   value     = local.db_secret_arn
   sensitive = true

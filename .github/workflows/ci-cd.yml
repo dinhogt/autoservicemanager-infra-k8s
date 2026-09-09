@@ -5,21 +5,37 @@ name: Infra K8s CI/CD
 on:
   push:
     branches: [master, develop]
+    paths:
+      - '**.tf'
+      - 'modules/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
+      - 'placeholder/**'
   pull_request:
     branches: [master, develop]
+    paths:
+      - '**.tf'
+      - 'modules/**'
+      - '.github/workflows/**'
+      - 'scripts/**'
+      - 'placeholder/**'
+
+concurrency:
+  group: infra-k8s-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   AWS_REGION: us-east-1
   TF_VERSION: '1.5.7'
   TF_LOCK_TABLE: autoservicemanager-tflock
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform.d/plugin-cache
 
 jobs:
   security-gate:
     uses: ./.github/workflows/security-gate.yml
 
   validate:
-    needs: security-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -27,10 +43,6 @@ jobs:
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '22'
 
       - name: Terraform fmt
         run: terraform fmt -check -recursive
@@ -45,6 +57,7 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
     needs: [validate, security-gate]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       id-token: write
       contents: read
@@ -61,6 +74,16 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+
+      - name: Cache Terraform providers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: terraform-${{ runner.os }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+          restore-keys: terraform-${{ runner.os }}-
+
+      - name: Ensure plugin cache dir
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v5
@@ -95,23 +118,23 @@ jobs:
       - name: Export TF_VAR_tf_state_bucket
         run: echo "TF_VAR_tf_state_bucket=${{ steps.backend.outputs.bucket }}" >> "$GITHUB_ENV"
 
-      - name: Wait for infra-db remote state
+      - name: Wait for infra-db remote state (fail-fast)
         run: |
           KEY="db/${TF_VAR_environment}/terraform.tfstate"
           BUCKET="${{ steps.backend.outputs.bucket }}"
-          for i in $(seq 1 40); do
+          for i in 1 2 3; do
             if aws s3 ls "s3://${BUCKET}/${KEY}" >/dev/null 2>&1; then
               echo "Remote state found: s3://${BUCKET}/${KEY}"
               exit 0
             fi
-            echo "Waiting for infra-db state (${i}/40)..."
-            sleep 30
+            echo "Waiting for infra-db state (${i}/3)..."
+            sleep 10
           done
           echo "::error::infra-db state not found at s3://${BUCKET}/${KEY}. Conclua o Infra DB CI/CD antes do infra-k8s."
           exit 1
 
       - name: Terraform plan
-        run: terraform plan -no-color -input=false -out=tfplan
+        run: terraform plan -no-color -input=false -lock-timeout=1m -out=tfplan
 
       - name: Terraform apply
-        run: terraform apply -input=false tfplan
+        run: terraform apply -input=false -lock-timeout=1m tfplan
