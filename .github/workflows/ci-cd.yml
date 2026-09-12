@@ -54,7 +54,11 @@ jobs:
         run: terraform validate
 
   plan-apply:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
+    # OIDC CD opcional: ENABLE_OIDC_CD=true + AWS_ROLE_ARN. Validate/security já cobrem o CI da demo.
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop') &&
+      vars.ENABLE_OIDC_CD == 'true'
     needs: [validate, security-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 60
