@@ -1,7 +1,7 @@
 resource "aws_apigatewayv2_api" "http" {
   name          = "${local.name}-http"
   protocol_type = "HTTP"
-  description   = "Fase 3 - auth CPF + proxy EKS (ADR-007)"
+  description   = "Auth CPF e serviços EKS via VPC Link"
 
   cors_configuration {
     allow_headers = ["authorization", "content-type", "x-amzn-trace-id", "x-correlation-id"]
@@ -33,8 +33,9 @@ resource "aws_apigatewayv2_stage" "default" {
   auto_deploy = true
 
   default_route_settings {
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
+    detailed_metrics_enabled = true
+    throttling_burst_limit   = 100
+    throttling_rate_limit    = 50
   }
 
   access_log_settings {
@@ -160,4 +161,43 @@ resource "aws_apigatewayv2_route" "health" {
   api_id    = aws_apigatewayv2_api.http.id
   route_key = "GET /health"
   target    = "integrations/${aws_apigatewayv2_integration.eks.id}"
+}
+
+# --- Serviços Fase 4 via listeners dedicados no mesmo NLB ---
+resource "aws_apigatewayv2_integration" "phase4_service" {
+  for_each = var.phase4_services
+
+  api_id               = aws_apigatewayv2_api.http.id
+  integration_type     = "HTTP_PROXY"
+  integration_uri      = aws_lb_listener.phase4_service[each.key].arn
+  integration_method   = "ANY"
+  connection_type      = "VPC_LINK"
+  connection_id        = aws_apigatewayv2_vpc_link.eks.id
+  timeout_milliseconds = 30000
+
+  request_parameters = {
+    "overwrite:header.x-cpf"              = "$context.authorizer.claims.sub"
+    "overwrite:header.x-scope"            = "$context.authorizer.claims.scope"
+    "overwrite:header.x-gateway-verified" = "1"
+  }
+}
+
+resource "aws_apigatewayv2_route" "phase4_service_root" {
+  for_each = var.phase4_services
+
+  api_id             = aws_apigatewayv2_api.http.id
+  route_key          = "ANY /${each.value.route_prefix}"
+  target             = "integrations/${aws_apigatewayv2_integration.phase4_service[each.key].id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+}
+
+resource "aws_apigatewayv2_route" "phase4_service_proxy" {
+  for_each = var.phase4_services
+
+  api_id             = aws_apigatewayv2_api.http.id
+  route_key          = "ANY /${each.value.route_prefix}/{proxy+}"
+  target             = "integrations/${aws_apigatewayv2_integration.phase4_service[each.key].id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
 }

@@ -375,3 +375,174 @@ resource "aws_cloudwatch_metric_alarm" "os_transicao_erro" {
   ok_actions    = [aws_sns_topic.ops_alerts.arn]
   tags          = local.tags
 }
+
+# Fase 4 — visão consolidada da jornada assíncrona. As expressões EMF usam
+# somente métricas emitidas pelos serviços OS, Billing e Execution.
+resource "aws_cloudwatch_dashboard" "fase4" {
+  dashboard_name = "${local.name}-ops-fase4"
+
+  dashboard_body = jsonencode({
+    widgets = concat(
+      [{
+        type       = "text", x = 0, y = 0, width = 24, height = 1,
+        properties = { markdown = "# Jornada OS — Fase 4 (${var.environment})" }
+      }],
+      flatten([
+        for index, service in sort(keys(var.phase4_services)) : [
+          {
+            type = "metric", x = index * 12, y = 1, width = 6, height = 6,
+            properties = {
+              title   = "${service} — RPS", region = var.aws_region, period = 60,
+              metrics = [["AWS/ApiGateway", "Count", "ApiId", aws_apigatewayv2_api.http.id, "Stage", aws_apigatewayv2_stage.default.name, "Route", "ANY /${var.phase4_services[service].route_prefix}/{proxy+}", { stat = "Sum", label = service }]]
+            }
+          },
+          {
+            type = "metric", x = index * 12 + 6, y = 1, width = 6, height = 6,
+            properties = {
+              title = "${service} — latência/5xx", region = var.aws_region, period = 60,
+              metrics = [
+                ["AWS/ApiGateway", "Latency", "ApiId", aws_apigatewayv2_api.http.id, "Stage", aws_apigatewayv2_stage.default.name, "Route", "ANY /${var.phase4_services[service].route_prefix}/{proxy+}", { stat = "p95", label = "p95 ms" }],
+                [".", "5xx", ".", ".", ".", ".", ".", ".", { stat = "Sum", label = "5xx", yAxis = "right" }]
+              ]
+            }
+          }
+        ]
+      ]),
+      [
+        {
+          type = "metric", x = 0, y = 7, width = 12, height = 7,
+          properties = {
+            title = "SQS — profundidade / idade / DLQ", region = var.aws_region, period = 60,
+            metrics = concat(
+              flatten([for service in sort(keys(var.phase4_services)) : [
+                ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.command[service].name, { stat = "Maximum", label = "${service} depth" }],
+                [".", "ApproximateAgeOfOldestMessage", ".", ".", { stat = "Maximum", label = "${service} age (s)", yAxis = "right" }],
+                [".", "ApproximateNumberOfMessagesVisible", ".", aws_sqs_queue.command_dlq[service].name, { stat = "Maximum", label = "${service} DLQ" }]
+              ]]),
+              [
+                ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.os_events.name, { stat = "Maximum", label = "OS events depth" }],
+                [".", "ApproximateAgeOfOldestMessage", ".", ".", { stat = "Maximum", label = "OS events age (s)", yAxis = "right" }],
+                [".", "ApproximateNumberOfMessagesVisible", ".", aws_sqs_queue.os_events_dlq.name, { stat = "Maximum", label = "OS events DLQ" }]
+              ]
+            )
+          }
+        },
+        {
+          type = "metric", x = 12, y = 7, width = 12, height = 7,
+          properties = {
+            title = "Saga — passos, duração e outcomes", region = var.aws_region, period = 300,
+            metrics = [
+              ["AutoServiceManager/${var.environment}", "SagaStarted", "Service", "os", { stat = "Sum" }],
+              [".", "SagaStepDuration", ".", ".", { stat = "p95", label = "step p95 ms" }],
+              [".", "SagaDuration", ".", ".", { stat = "p95", label = "saga p95 ms" }],
+              [".", "SagaOutcome", ".", ".", { stat = "Sum", label = "outcomes", yAxis = "right" }]
+            ]
+          }
+        },
+        {
+          type = "metric", x = 0, y = 14, width = 8, height = 7,
+          properties = {
+            title = "Billing / Mercado Pago / refund", region = var.aws_region, period = 300,
+            metrics = [
+              ["AutoServiceManager/${var.environment}", "PaymentOutcome", "Service", "billing", { stat = "Sum" }],
+              [".", "MercadoPagoDuration", ".", ".", { stat = "p95", label = "MP p95 ms" }],
+              [".", "MercadoPagoError", ".", ".", { stat = "Sum", label = "MP errors", yAxis = "right" }],
+              [".", "RefundFailed", ".", ".", { stat = "Sum", label = "refund failed", yAxis = "right" }]
+            ]
+          }
+        },
+        {
+          type = "metric", x = 8, y = 14, width = 8, height = 7,
+          properties = {
+            title = "Execution / diagnóstico", region = var.aws_region, period = 300,
+            metrics = [
+              ["AutoServiceManager/${var.environment}", "ExecutionDuration", "Service", "execution", { stat = "p95" }],
+              [".", "ExecutionOutcome", ".", ".", { stat = "Sum", label = "outcomes", yAxis = "right" }],
+              [".", "QueueMessageAge", ".", ".", { stat = "p95", label = "queue p95 ms" }]
+            ]
+          }
+        },
+        {
+          type = "metric", x = 16, y = 14, width = 8, height = 7,
+          properties = {
+            title = "EKS — CPU / memória", region = var.aws_region, period = 60,
+            metrics = [
+              ["ContainerInsights", "pod_cpu_utilization", "ClusterName", module.eks.cluster_name, "Namespace", "autoservice", { stat = "Average", label = "CPU %" }],
+              [".", "pod_memory_utilization", ".", ".", ".", ".", { stat = "Average", label = "memória %", yAxis = "right" }]
+            ]
+          }
+        },
+        {
+          type = "log", x = 0, y = 21, width = 24, height = 7,
+          properties = {
+            title = "Jornada por correlationId / sagaId / messageId", region = var.aws_region,
+            query = <<-EOT
+              SOURCE '${aws_cloudwatch_log_group.eks_application.name}'
+              | fields @timestamp, service, event, correlationId, sagaId, messageId, aggregateId, durationMs, outcome
+              | filter ispresent(correlationId)
+              | sort @timestamp desc
+              | limit 100
+            EOT
+          }
+        }
+      ]
+    )
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "refund_failed" {
+  alarm_name          = "${local.name}-refund-failed"
+  alarm_description   = "Refund falhou; bloquear a Saga e acionar o financeiro."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  metric_name         = "RefundFailed"
+  namespace           = "AutoServiceManager/${var.environment}"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  dimensions          = { Service = "billing" }
+  alarm_actions       = [aws_sns_topic.ops_alerts.arn]
+  ok_actions          = [aws_sns_topic.ops_alerts.arn]
+  tags                = merge(local.tags, { Service = "billing" })
+}
+
+resource "aws_cloudwatch_metric_alarm" "saga_duration_p95" {
+  alarm_name          = "${local.name}-saga-duration-p95-stuck"
+  alarm_description   = "p95 da Saga acima de dez minutos; correlacionar com idade das filas."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "SagaDuration"
+  namespace           = "AutoServiceManager/${var.environment}"
+  period              = 300
+  extended_statistic  = "p95"
+  threshold           = 600000
+  treat_missing_data  = "notBreaching"
+  dimensions          = { Service = "os" }
+  alarm_actions       = [aws_sns_topic.ops_alerts.arn]
+  ok_actions          = [aws_sns_topic.ops_alerts.arn]
+  tags                = merge(local.tags, { Service = "os" })
+}
+
+resource "aws_cloudwatch_metric_alarm" "phase4_service_5xx" {
+  for_each = var.phase4_services
+
+  alarm_name          = "${local.name}-${each.key}-5xx"
+  alarm_description   = "O serviço ${each.key} retornou erro 5xx pela rota principal."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "5xx"
+  namespace           = "AWS/ApiGateway"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+  dimensions = {
+    ApiId = aws_apigatewayv2_api.http.id
+    Stage = aws_apigatewayv2_stage.default.name
+    Route = "ANY /${each.value.route_prefix}/{proxy+}"
+  }
+  alarm_actions = [aws_sns_topic.ops_alerts.arn]
+  ok_actions    = [aws_sns_topic.ops_alerts.arn]
+  tags          = merge(local.tags, { Service = each.key })
+}

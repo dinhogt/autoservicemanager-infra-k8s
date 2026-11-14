@@ -4,3 +4,9 @@ environment  = "homolog"
 
 # tf_state_bucket = "autoservicemanager-tfstate-ACCOUNT_ID"
 # node_desired_size = 1
+
+# Os target ports devem coincidir com os containers/Services Kubernetes.
+# phase4_services = {
+#   billing    = { listener_port = 8081, target_port = 3000, route_prefix = "billing" }
+#   execution  = { listener_port = 8082, target_port = 3000, route_prefix = "execucoes" }
+# }

@@ -102,3 +102,50 @@ output "ops_dashboard_name" {
 output "cloudwatch_application_log_group" {
   value = aws_cloudwatch_log_group.eks_application.name
 }
+
+output "phase4_command_queue_urls" {
+  description = "URLs das filas de comando por serviço."
+  value       = { for service, queue in aws_sqs_queue.command : service => queue.url }
+}
+
+output "phase4_command_queue_arns" {
+  description = "ARNs das filas de comando por serviço."
+  value       = { for service, queue in aws_sqs_queue.command : service => queue.arn }
+}
+
+output "phase4_command_dlq_arns" {
+  description = "ARNs das DLQs de comando por serviço."
+  value       = { for service, queue in aws_sqs_queue.command_dlq : service => queue.arn }
+}
+
+output "phase4_event_topic_arns" {
+  description = "ARNs dos tópicos de eventos por serviço."
+  value       = { for service, topic in aws_sns_topic.service_events : service => topic.arn }
+}
+
+output "os_events_queue_url" {
+  description = "Fila consumida pelo serviço de OS com eventos dos serviços da Fase 4."
+  value       = aws_sqs_queue.os_events.url
+}
+
+output "os_events_dlq_arn" {
+  value = aws_sqs_queue.os_events_dlq.arn
+}
+
+output "phase4_irsa_role_arns" {
+  description = "ARNs IRSA para os ServiceAccounts autoservice-<service>."
+  value       = { for service, role in aws_iam_role.phase4_service : service => role.arn }
+}
+
+output "phase4_target_group_arns" {
+  description = "Target groups para TargetGroupBinding/Services dos três serviços."
+  value       = { for service, tg in aws_lb_target_group.phase4_service : service => tg.arn }
+}
+
+output "phase4_listener_arns" {
+  value = { for service, listener in aws_lb_listener.phase4_service : service => listener.arn }
+}
+
+output "dynamodb_table_names" {
+  value = local.dynamodb_table_names
+}

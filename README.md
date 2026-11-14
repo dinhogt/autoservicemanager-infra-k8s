@@ -2,7 +2,7 @@
 
 ## Propósito
 
-Infraestrutura como código do **cluster Kubernetes**, **API Gateway**, wiring da Lambda de auth, JWKS e **observabilidade** (Fase 3). Consome outputs do [infra-db](https://github.com/dinhogt/autoservicemanager-infra-db) via remote state (ADR-008).
+Infraestrutura como código do **cluster Kubernetes**, **API Gateway**, NLB, mensageria, IAM/IRSA, wiring da Lambda de auth, JWKS e **observabilidade**. Consome outputs do [infra-db](https://github.com/dinhogt/autoservicemanager-infra-db) via remote state (ADR-008).
 
 ## Tecnologias
 
@@ -35,6 +35,9 @@ flowchart TB
 | Remote state | Lê `db/<homolog\|prod>/terraform.tfstate` |
 | EKS | Kubernetes 1.34, node `t3.medium` |
 | API Gateway | `POST /auth/cpf` → Lambda; rotas cliente com JWT; admin/health sem RS256 |
+| Serviços Fase 4 | Rotas JWT e listeners/target groups dedicados para billing, diagnostic e execution |
+| Mensageria | Command queue + DLQ por serviço; tópico de eventos por serviço; fila de eventos do OS |
+| IRSA Fase 4 | Menor privilégio por serviço para sua fila, tópico e tabela (quando aplicável) |
 | Lambda | Placeholder no plan; código real via CI [auth-lambda](https://github.com/dinhogt/autoservicemanager-auth-lambda) (auth-cpf + notify-os) |
 | SNS | `os-notifications` → Lambda notify-os → SES |
 | Observabilidade | Addon CloudWatch observability, dashboards (OS volume, fases, CPU/mem), alarmes SNS (ADR-012) |
@@ -60,7 +63,10 @@ TF_VAR_environment=homolog TF_VAR_tf_state_bucket=... terraform apply
 2. Registrar pods no `target_group_arn`
 3. Secrets `AUTH_LAMBDA_NAME` + `NOTIFY_LAMBDA_NAME` no repo auth-lambda
 4. ConfigMap/Secret `OS_NOTIFICATIONS_TOPIC_ARN` no app
-5. Assinar SNS de alertas (docs obs no app)
+5. Configurar os ServiceAccounts `autoservice-billing`, `autoservice-diagnostic` e `autoservice-execution` com `phase4_irsa_role_arns`
+6. Criar os TargetGroupBindings dos serviços com `phase4_target_group_arns`; cada pod escuta `target_port`
+7. Injetar `phase4_command_queue_urls`, `phase4_event_topic_arns`, `os_events_queue_url` e `dynamodb_table_names`
+8. Assinar SNS de alertas (docs obs no app)
 
 Swagger / Postman: [app README](https://github.com/dinhogt/autoservicemanager-app#documentação-da-api-swagger).
 
@@ -82,4 +88,4 @@ Destruir **este stack antes** do [infra-db](https://github.com/dinhogt/autoservi
 
 ## Outputs principais
 
-`api_endpoint`, `jwt_issuer`, `eks_cluster_name`, `auth_lambda_name`, `notify_lambda_name`, `os_notifications_topic_arn`, `target_group_arn`, `app_irsa_role_arn`, `ops_alerts_topic_arn`, `ops_dashboard_name`
+Além dos outputs existentes, a Fase 4 exporta `phase4_command_queue_urls`, `phase4_command_dlq_arns`, `phase4_event_topic_arns`, `os_events_queue_url`, `phase4_irsa_role_arns`, `phase4_target_group_arns`, `phase4_listener_arns` e `dynamodb_table_names`.

@@ -27,13 +27,15 @@ data "terraform_remote_state" "db" {
 }
 
 locals {
-  vpc_id             = data.terraform_remote_state.db.outputs.vpc_id
-  vpc_cidr           = data.terraform_remote_state.db.outputs.vpc_cidr
-  private_subnet_ids = data.terraform_remote_state.db.outputs.private_subnet_ids
-  public_subnet_ids  = data.terraform_remote_state.db.outputs.public_subnet_ids
-  db_sg_id           = data.terraform_remote_state.db.outputs.db_sg_id
-  db_port            = data.terraform_remote_state.db.outputs.db_port
-  db_secret_arn      = data.terraform_remote_state.db.outputs.db_secret_arn
+  vpc_id               = data.terraform_remote_state.db.outputs.vpc_id
+  vpc_cidr             = data.terraform_remote_state.db.outputs.vpc_cidr
+  private_subnet_ids   = data.terraform_remote_state.db.outputs.private_subnet_ids
+  public_subnet_ids    = data.terraform_remote_state.db.outputs.public_subnet_ids
+  db_sg_id             = data.terraform_remote_state.db.outputs.db_sg_id
+  db_port              = data.terraform_remote_state.db.outputs.db_port
+  db_secret_arn        = data.terraform_remote_state.db.outputs.db_secret_arn
+  dynamodb_table_names = data.terraform_remote_state.db.outputs.dynamodb_table_names
+  dynamodb_table_arns  = data.terraform_remote_state.db.outputs.dynamodb_table_arns
 }
 
 module "eks" {

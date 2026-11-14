@@ -78,3 +78,67 @@ resource "aws_apigatewayv2_vpc_link" "eks" {
   subnet_ids         = local.private_subnet_ids
   tags               = local.tags
 }
+
+locals {
+  phase4_target_ports = setsubtract(
+    toset([for config in values(var.phase4_services) : tostring(config.target_port)]),
+    toset([tostring(var.app_port)])
+  )
+}
+
+resource "aws_security_group_rule" "nodes_from_vpclink_phase4" {
+  for_each = local.phase4_target_ports
+
+  type                     = "ingress"
+  from_port                = tonumber(each.value)
+  to_port                  = tonumber(each.value)
+  protocol                 = "tcp"
+  security_group_id        = module.eks.node_security_group_id
+  source_security_group_id = aws_security_group.vpclink.id
+  description              = "Phase 4 service port from VPC Link ENIs"
+}
+
+resource "aws_security_group_rule" "nodes_from_nlb_health_phase4" {
+  for_each = local.phase4_target_ports
+
+  type              = "ingress"
+  from_port         = tonumber(each.value)
+  to_port           = tonumber(each.value)
+  protocol          = "tcp"
+  security_group_id = module.eks.node_security_group_id
+  cidr_blocks       = [local.vpc_cidr]
+  description       = "Phase 4 NLB health checks from VPC CIDR"
+}
+
+resource "aws_lb_target_group" "phase4_service" {
+  for_each = var.phase4_services
+
+  name        = substr("${local.name}-${each.key}", 0, 32)
+  port        = each.value.target_port
+  protocol    = "TCP"
+  vpc_id      = local.vpc_id
+  target_type = "ip"
+
+  health_check {
+    protocol            = "TCP"
+    port                = tostring(each.value.target_port)
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    interval            = 10
+  }
+
+  tags = merge(local.tags, { Service = each.key })
+}
+
+resource "aws_lb_listener" "phase4_service" {
+  for_each = var.phase4_services
+
+  load_balancer_arn = aws_lb.eks.arn
+  port              = each.value.listener_port
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.phase4_service[each.key].arn
+  }
+}
