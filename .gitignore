@@ -16,3 +16,6 @@ tfplan
 *.tfplan
 # Gerado por data.archive_file (não versionar)
 placeholder.zip
+
+# specs locais do agente (não faz parte da entrega)
+spec-skills-lib/
